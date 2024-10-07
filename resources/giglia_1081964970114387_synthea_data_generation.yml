@@ -1,0 +1,104 @@
+resources:
+  jobs:
+    giglia_1081964970114387_synthea_data_generation:
+      name: giglia-1081964970114387-synthea-data-generation
+      job_clusters:
+        - new_cluster:
+            driver_instance_pool_id: 0727-104344-hauls13-pool-uftxk0r6
+            instance_pool_id: 0727-104344-hauls13-pool-uftxk0r6
+            runtime_engine: STANDARD
+            custom_tags:
+              "ResourceClass": "SingleNode"
+            spark_conf:
+              "spark.master": "local[*, 4]"
+              "spark.databricks.cluster.profile": "singleNode"
+            spark_version: 15.4.x-scala2.12
+            data_security_mode: SINGLE_USER
+            spark_env_vars:
+              JNAME: zulu17-ca-amd64
+          job_cluster_key: giglia-1081964970114387-synthea-data-gen
+      tasks:
+        - task_key: synthea_set_up_check
+          job_cluster_key: giglia-1081964970114387-synthea-data-gen
+          email_notifications: {}
+          run_if: ALL_SUCCESS
+          notification_settings: {}
+          description: Check to see if the synthea jar and configuration files have been set up
+          webhook_notifications: {}
+          notebook_task:
+            notebook_path: ../src/0.0-set-up-check.py
+            source: WORKSPACE
+        - task_key: result_conditional
+          depends_on:
+            - task_key: synthea_set_up_check
+          description: Check the result of the synthea_set_up_check task. If 'true' then proceed with data generation, otherwise prepare the catalog, schema, volume, synthea jar file and configuration files.
+          run_if: ALL_SUCCESS
+          email_notifications: {}
+          condition_task:
+            op: EQUAL_TO
+            right: True
+            left: '{{tasks.[synthea_set_up_check].values.[result]}}'
+          notification_settings: {}
+          webhook_notifications: {}
+        - task_key: uc_setup
+          depends_on:
+            - outcome: "false"
+              task_key: result_conditional
+          job_cluster_key: giglia-1081964970114387-synthea-data-gen
+          notification_settings: {}
+          description: Create the catalog, schema, and volume for the data to be saved in if it does not exist.
+          run_if: ALL_SUCCESS
+          email_notifications: {}
+          webhook_notifications: {}
+          notebook_task:
+            notebook_path: ../src/0.1-uc-setup.py
+            source: WORKSPACE
+        - task_key: install_synthea
+          depends_on:
+            - task_key: uc_setup
+          job_cluster_key: giglia-1081964970114387-synthea-data-gen
+          webhook_notifications: {}
+          email_notifications: {}
+          notebook_task:
+            notebook_path: ../src/0.2-install-synthea.py
+            source: WORKSPACE
+          run_if: ALL_SUCCESS
+          notification_settings: {}
+          description: Download the synthea jar file and save to the specified volume.
+        - task_key: configure_synthea
+          depends_on:
+            - task_key: install_synthea
+          job_cluster_key: giglia-1081964970114387-synthea-data-gen
+          webhook_notifications: {}
+          notification_settings: {}
+          run_if: ALL_SUCCESS
+          description: Write synthea configuration file to the volume to control data output.
+          email_notifications: {}
+          notebook_task:
+            notebook_path: ../src/0.3-synthea-configuration.py
+            source: WORKSPACE
+        - task_key: generate_synthetic_data
+          depends_on:
+            - task_key: result_conditional
+              outcome: "true"
+            - task_key: configure_synthea
+          job_cluster_key: giglia-1081964970114387-synthea-data-gen
+          notification_settings: {}
+          notebook_task:
+            source: WORKSPACE
+            notebook_path: ../src/1.0-synthea-data-generator.py
+          email_notifications: {}
+          webhook_notifications: {}
+          description: Run synthea to generate synthetic healthcare data.
+          run_if: AT_LEAST_ONE_SUCCESS
+      parameters:
+        - name: catalog_name
+          default: mgiglia
+        - name: schema_name
+          default: synthea
+      description: Job to generate synthetic data for matthew.giglia@databricks.com in /Volumes/mgiglia/synthea/synthetic_files_raw/ using the synthea library jar.
+      max_concurrent_runs: 1
+      webhook_notifications: {}
+      email_notifications: {}
+      queue:
+        enabled: true
